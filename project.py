@@ -2,7 +2,7 @@ import cv2
 import glob
 import numpy as np
 import pickle
-
+from moviepy.editor import VideoFileClip
 
 IMG_SIZE = (1280, 720)
 
@@ -262,7 +262,7 @@ def measure_curvature(ploty=None,
 
 def calculate_vehicle_pos(lane_center):
     difference_from_center = 640 - lane_center
-    print("difference_from_center", difference_from_center)
+    # print("difference_from_center", difference_from_center)
     distance_in_meters = difference_from_center * XM_PER_PIX
     if distance_in_meters == 0:  # Vehicle is in center
         position = "Vehicle is in center."
@@ -554,9 +554,51 @@ class ImgPipeLine:
 
 
 # images_pipeline()
-pipeline = ImgPipeLine()
-pipeline.images_pipeline()
+# pipeline = ImgPipeLine()
+# pipeline.images_pipeline()
 
+
+class VideoPipeline(ImgPipeLine):
+
+    def __init__(self):
+        super().__init__()
+        self.image_index = 0
+
+    def full_pipe_for_single_image(self, img):
+
+        # read the calibration parameters
+        dist_pickle = pickle.load(open("calibration_mtx_dist_pickle.p", "rb"))
+        mtx = dist_pickle["mtx"]
+        dist = dist_pickle["dist"]
+
+        undistorted = cv2.undistort(img, mtx, dist, None, mtx)
+        binary_img = binary_image(undistorted)
+        warped_img = warper(binary_img, src=SRC, dst=DST)
+        warped_color = cv2.cvtColor(warped_img, cv2.COLOR_GRAY2BGR)
+        lines_plotted = self.mark_lines(warped_color)  # this adds "filled_lane" to "self.filled_lane" array.
+        unwarped_lane = warper(self.filled_lane[self.image_index], src=SRC, dst=DST, inv=True)
+
+        result = cv2.addWeighted(undistorted, 1, unwarped_lane, 0.3, 0)
+        put_curvature = cv2.putText(result, "Radius of Curvature: {}".format(self.curvature[self.image_index]), (10, 30),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
+
+        vehicle_position = calculate_vehicle_pos(self.lane_centers[self.image_index])
+        put_position = cv2.putText(put_curvature, "{}".format(vehicle_position), (10, 90),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
+        self.image_index += 1
+        return put_position
+
+    def video_pipeline(self, input_video_path, output_video_path):
+
+        clip1 = VideoFileClip(input_video_path)
+        final_clip = clip1.fl_image(self.full_pipe_for_single_image)
+        final_clip.write_videofile(output_video_path, audio=False)
+
+        return True
+
+
+video_pipe = VideoPipeline()
+video_pipe.video_pipeline(input_video_path="project_video.mp4", output_video_path="output_videos/project_video.mp4")
 
 # Define a class to receive the characteristics of each line detection
 class Line:
