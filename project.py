@@ -23,6 +23,9 @@ DST = np.float32(
      [(IMG_SIZE[0] * 3 / 4), IMG_SIZE[1]],
      [(IMG_SIZE[0] * 3 / 4), 0]])
 
+# Define conversions in x and y from pixels space to meters
+YM_PER_PIX = 30 / 720  # meters per pixel in y dimension
+XM_PER_PIX = 3.7 / 700  # meters per pixel in x dimension
 
 def calculate_calibration_points(num_rows, num_cols, glob_images_path):
     """
@@ -215,28 +218,89 @@ def calibration_pipeline():
         undistort_images(mtx, dist, images)
 
 
+def measure_curvature(ploty=None,
+                      left_fit=None,
+                      right_fit=None,
+                      leftx=None,
+                      rightx=None):
+
+    # print(ploty.shape)
+    # print(leftx.shape)
+    # print(rightx.shape)
+
+    y_eval = np.max(ploty)
+    left_curverad = ((1 + (2 * left_fit[0] * y_eval + left_fit[1]) ** 2) ** 1.5) / np.absolute(2 * left_fit[0])
+    right_curverad = ((1 + (2 * right_fit[0] * y_eval + right_fit[1]) ** 2) ** 1.5) / np.absolute(2 * right_fit[0])
+    # print(left_curverad, right_curverad)
+    # Example values: 1926.74 1908.48
+
+    # Define conversions in x and y from pixels space to meters
+    ym_per_pix = YM_PER_PIX  # meters per pixel in y dimension
+    xm_per_pix = XM_PER_PIX  # meters per pixel in x dimension
+
+    # Fit new polynomials to x,y in world space
+
+    left_fit_cr = np.polyfit(ploty * ym_per_pix, leftx * xm_per_pix, 2)
+    # print("left_fit_cr", left_fit_cr)
+    # print("len(left_fit_cr)", len(left_fit_cr))
+
+    right_fit_cr = np.polyfit(ploty * ym_per_pix, rightx * xm_per_pix, 2)
+
+    # Calculate the new radii of curvature
+    left_curverad = ((1 + (2 * left_fit_cr[0] * y_eval * ym_per_pix + left_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
+        2 * left_fit_cr[0])
+    right_curverad = ((1 + (2 * right_fit_cr[0] * y_eval * ym_per_pix + right_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
+        2 * right_fit_cr[0])
+    # Now our radius of curvature is in meters
+    # print(left_curverad, 'm', right_curverad, 'm')
+    # Example values: 632.1 m    626.2 m
+
+    curverad = (left_curverad + right_curverad) / 2
+
+    return curverad
+
+
+def calculate_vehicle_pos(lane_center):
+    difference_from_center = 640 - lane_center
+    print("difference_from_center", difference_from_center)
+    distance_in_meters = difference_from_center * XM_PER_PIX
+    if distance_in_meters == 0:  # Vehicle is in center
+        position = "Vehicle is in center."
+    elif distance_in_meters > 0:
+        position = "Vehicle is {0:.2f} m right of center.".format(distance_in_meters)
+    else:
+        position = "Vehicle is {0:.2f} m left of center.".format(-distance_in_meters)
+    return position
+
+
 class ImgPipeLine:
     def __init__(self):
         self.function_name = None
         self.curvature = []
         self.filled_lane = []
+        self.lane_centers = []
 
-    # def run_image_pipeline_function(self, **kwargs):
-    #     print("fonksiyon çalıştı:", self.function_name)
-    #     image_paths = kwargs.get("image_paths")
-    #     new_path = kwargs.get("new_path")
-    #     is_binary_image = kwargs.get("is_binary")
-    #     write_to_disk = kwargs.get("write_to_disk")
-    #     for image_path in image_paths:
-    #         image_name = image_path.split("/")[-1].split(".")[0]
-    #         image = cv2.imread(image_path)
-    #         new_image_path = new_path + image_name + ".jpg"
-    #         new_image = self.function_name(image, **kwargs)
-    #         if write_to_disk:
-    #             if is_binary_image:
-    #                 cv2.imwrite(new_image_path, new_image*255)
-    #             else:
-    #                 cv2.imwrite(new_image_path, new_image)
+    def fill_lane_area(self, img, ploty, left_fitx, right_fitx):
+        # Create an image to draw the lines on
+        warped_zero = np.zeros_like(img)
+        # color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
+        # Recast the x and y points into usable format for cv2.fillPoly()
+        pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
+        pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
+
+        # print(pts_left[0][719][0])
+        # print(pts_right[0][0][0])
+        lane_center = (pts_left[0][719][0] + pts_right[0][0][0]) / 2
+        self.lane_centers.append(lane_center)
+
+        pts = np.hstack((pts_left, pts_right))
+        # Draw the lane onto the warped blank image
+        filled = cv2.fillPoly(warped_zero, np.int_([pts]), (0, 255, 0))
+        # Warp the blank back to original image space using inverse perspective matrix (Minv)
+        # newwarp = cv2.warpPerspective(warp_zero, Minv, (image.shape[1], image.shape[0]), flags=cv2.INTER_LINEAR)
+        # Combine the result with the original image
+        # result = cv2.addWeighted(img, 1, filled, 0.3, 0)
+        return filled
 
     def mark_lines(self, img):
         binary_warped = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -258,8 +322,8 @@ class ImgPipeLine:
         leftx_base = np.argmax(histogram[:midpoint])
         rightx_base = np.argmax(histogram[midpoint:]) + midpoint
 
-        print("leftx_base", leftx_base)  # 334
-        print("rightx_base", rightx_base)  # 948
+        # print("leftx_base", leftx_base)  # 334
+        # print("rightx_base", rightx_base)  # 948
 
         # Choose the number of sliding windows
         nwindows = 9
@@ -362,9 +426,9 @@ class ImgPipeLine:
         left_fitx = left_fit[0] * ploty ** 2 + left_fit[1] * ploty + left_fit[2]
         right_fitx = right_fit[0] * ploty ** 2 + right_fit[1] * ploty + right_fit[2]
         # print("left_fitx", left_fitx)
-        print("len(left_fitx)", len(left_fitx))  # her bir y pixeli için bir x değeri bulduk sol çizgi
-        # print("right_fitx", right_fitx)
-        print("len(right_fitx)", len(right_fitx))  # her bir y pixeli için bir x değeri bulduk sağ çizgi
+        # print("len(left_fitx)", len(left_fitx))  # her bir y pixeli için bir x değeri bulduk sol çizgi
+        # # print("right_fitx", right_fitx)
+        # print("len(right_fitx)", len(right_fitx))  # her bir y pixeli için bir x değeri bulduk sağ çizgi
 
         out_img[nonzeroy[left_lane_inds], nonzerox[left_lane_inds]] = [255, 0, 0]
         out_img[nonzeroy[right_lane_inds], nonzerox[right_lane_inds]] = [0, 0, 255]
@@ -429,117 +493,13 @@ class ImgPipeLine:
         cv2.fillPoly(window_img, np.int_([right_line_pts]), (0, 255, 0))
 
         result = cv2.addWeighted(out_img, 1, window_img, 0.3, 0)
-        # plt.imshow(result)
-        # plt.plot(left_fitx, ploty, color='yellow')
-        # plt.plot(right_fitx, ploty, color='yellow')
-        # plt.xlim(0, 1280)
-        # plt.ylim(720, 0)
-        # plt.show()
-        # print(ploty.shape)
-        # print(leftx.shape)
-        # print(rightx.shape)
-        #
-        # print(left_line_pts[0])
-        # print(right_line_pts.shape)
 
         # leftx yerine left_fitx gönderdik, ki bunlar noktalar
-        curvature = self.measure_curvature(ploty, left_fit, right_fit, leftx=left_fitx, rightx=right_fitx)
+        curvature = measure_curvature(ploty, left_fit, right_fit, leftx=left_fitx, rightx=right_fitx)
         filled_lane = self.fill_lane_area(result, ploty, left_fitx, right_fitx)
         self.curvature.append(curvature)
         self.filled_lane.append(filled_lane)
         return result
-
-    def measure_curvature(self, ploty=None,
-                          left_fit=None,
-                          right_fit=None,
-                          leftx=None,
-                          rightx=None):
-        # Generate some fake data to represent lane-line pixels
-        # ploty = np.linspace(0, 719, num=720)  # to cover same y-range as image
-        # quadratic_coeff = 3e-4  # arbitrary quadratic coefficient
-        # #
-        # # For each y position generate random x position within +/-50 pix
-        # # of the line base position in each case (x=200 for left, and x=900 for right)
-        # leftx = np.array([200 + (y ** 2) * quadratic_coeff + np.random.randint(-50, high=51) for y in ploty])
-        # rightx = np.array([900 + (y ** 2) * quadratic_coeff + np.random.randint(-50, high=51) for y in ploty])
-        #
-        # leftx = leftx[::-1]  # Reverse to match top-to-bottom in y
-        # rightx = rightx[::-1]  # Reverse to match top-to-bottom in y
-
-        print(ploty.shape)
-        print(leftx.shape)
-        print(rightx.shape)
-        #
-        # # Fit a second order polynomial to pixel positions in each fake lane line
-        # left_fit = np.polyfit(ploty, leftx, 2)
-        # left_fitx = left_fit[0] * ploty ** 2 + left_fit[1] * ploty + left_fit[2]
-        # right_fit = np.polyfit(ploty, rightx, 2)
-        # right_fitx = right_fit[0] * ploty ** 2 + right_fit[1] * ploty + right_fit[2]
-        #
-        # print(left_fit.shape)
-        # print(left_fitx.shape)
-        # print(right_fit.shape)
-        # print(right_fitx.shape)
-
-        # Plot up the fake data
-        # mark_size = 3
-        # plt.plot(leftx, ploty, 'o', color='red', markersize=mark_size)
-        # plt.plot(rightx, ploty, 'o', color='blue', markersize=mark_size)
-        # plt.xlim(0, 1280)
-        # plt.ylim(0, 720)
-        # plt.plot(left_fitx, ploty, color='green', linewidth=3)
-        # plt.plot(right_fitx, ploty, color='green', linewidth=3)
-        # plt.gca().invert_yaxis()  # to visualize as we do the images
-        # plt.show()
-
-        # Define y-value where we want radius of curvature
-        # I'll choose the maximum y-value, corresponding to the bottom of the image
-        y_eval = np.max(ploty)
-        left_curverad = ((1 + (2 * left_fit[0] * y_eval + left_fit[1]) ** 2) ** 1.5) / np.absolute(2 * left_fit[0])
-        right_curverad = ((1 + (2 * right_fit[0] * y_eval + right_fit[1]) ** 2) ** 1.5) / np.absolute(2 * right_fit[0])
-        # print(left_curverad, right_curverad)
-        # Example values: 1926.74 1908.48
-
-        # Define conversions in x and y from pixels space to meters
-        ym_per_pix = 30 / 720  # meters per pixel in y dimension
-        xm_per_pix = 3.7 / 700  # meters per pixel in x dimension
-
-        # Fit new polynomials to x,y in world space
-
-        left_fit_cr = np.polyfit(ploty * ym_per_pix, leftx * xm_per_pix, 2)
-        print("left_fit_cr", left_fit_cr)
-        print("len(left_fit_cr)", len(left_fit_cr))
-
-        right_fit_cr = np.polyfit(ploty * ym_per_pix, rightx * xm_per_pix, 2)
-
-        # Calculate the new radii of curvature
-        left_curverad = ((1 + (2 * left_fit_cr[0] * y_eval * ym_per_pix + left_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
-            2 * left_fit_cr[0])
-        right_curverad = ((1 + (2 * right_fit_cr[0] * y_eval * ym_per_pix + right_fit_cr[1]) ** 2) ** 1.5) / np.absolute(
-            2 * right_fit_cr[0])
-        # Now our radius of curvature is in meters
-        # print(left_curverad, 'm', right_curverad, 'm')
-        # Example values: 632.1 m    626.2 m
-
-        curverad = (left_curverad + right_curverad) / 2
-
-        return curverad
-
-    def fill_lane_area(self, img, ploty, left_fitx, right_fitx):
-        # Create an image to draw the lines on
-        warped_zero = np.zeros_like(img)
-        # color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
-        # Recast the x and y points into usable format for cv2.fillPoly()
-        pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
-        pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
-        pts = np.hstack((pts_left, pts_right))
-        # Draw the lane onto the warped blank image
-        filled = cv2.fillPoly(warped_zero, np.int_([pts]), (0, 255, 0))
-        # Warp the blank back to original image space using inverse perspective matrix (Minv)
-        # newwarp = cv2.warpPerspective(warp_zero, Minv, (image.shape[1], image.shape[0]), flags=cv2.INTER_LINEAR)
-        # Combine the result with the original image
-        # result = cv2.addWeighted(img, 1, filled, 0.3, 0)
-        return filled
 
     def images_pipeline(self):
             # step 1 : Undistort all test images
@@ -579,15 +539,17 @@ class ImgPipeLine:
                               write_directory="output_images/03_lane_lines/")
 
             # step 5: Fill lane line area on uwarped image and write line parameter on image
-
             for i, image_path in enumerate(undist_images):
                 image = cv2.imread(image_path)
                 unwarped_lane = warper(self.filled_lane[i], src=SRC, dst=DST, inv=True)
                 result = cv2.addWeighted(image, 1, unwarped_lane, 0.3, 0)
                 put_curvature = cv2.putText(result, "Radius of Curvature: {}".format(self.curvature[i]), (10, 30),
-                                            cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
+                                            cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
 
-                write_to_disk(put_curvature, image_path=image_path,
+                vehicle_position = calculate_vehicle_pos(self.lane_centers[i])
+                put_position = cv2.putText(put_curvature, "{}".format(vehicle_position), (10, 90),
+                                           cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
+                write_to_disk(put_position, image_path=image_path,
                               write_directory="output_images/04_unwarped_images/")
 
 
