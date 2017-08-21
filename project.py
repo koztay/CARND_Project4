@@ -2,6 +2,7 @@ import cv2
 import glob
 import numpy as np
 import pickle
+
 from moviepy.editor import VideoFileClip
 
 IMG_SIZE = (1280, 720)
@@ -26,6 +27,9 @@ DST = np.float32(
 # Define conversions in x and y from pixels space to meters
 YM_PER_PIX = 30 / 720  # meters per pixel in y dimension
 XM_PER_PIX = 3.7 / 700  # meters per pixel in x dimension
+
+NUM_ITERATIONS_TO_KEEP = 20
+NUM_IMAGES_TO_KEEP = 2
 
 def calculate_calibration_points(num_rows, num_cols, glob_images_path):
     """
@@ -275,10 +279,65 @@ def calculate_vehicle_pos(lane_center):
 
 class ImgPipeLine:
     def __init__(self):
-        self.function_name = None
-        self.curvature = []
+
+        self.curvature = []  # This is for image pipeline
         self.filled_lane = []
         self.lane_centers = []
+
+        # x values of the last n fits of the line
+        self.left_fit = []
+        self.right_fit = []
+
+        self.ploty = []
+        self.left_fitx = []
+        self.right_fitx = []
+        # self.fill_lane_area(result, ploty, left_fitx, right_fitx)
+
+        # self.leftx = None
+        # self.rightx = None
+
+        # was the line detected in the last iteration?
+        self.detected = False
+
+        # x values of the last n fits of the line
+        # self.recent_xfitted = []
+
+        # average x values of the fitted line over the last n iterations
+        # self.bestx = None
+        #
+        # # polynomial coefficients averaged over the last n iterations
+        # self.best_fit = None
+        #
+        # # polynomial coefficients for the most recent fit
+        # self.current_fit = [np.array([False])]
+
+        # # radius of curvature of the line in some units
+        # self.radius_of_curvature = None
+        #
+        # # distance in meters of vehicle center from the line
+        # self.line_base_pos = None
+
+        # difference in fit coefficients between last and new fits
+        self.diffs = np.array([0, 0, 0], dtype='float')
+
+        # x values for detected line pixels
+        self.allx = None
+
+        # y values for detected line pixels
+        self.ally = None
+
+    def calculate_mean_fit(self):
+        print(self.left_fit)  # this should be array
+        print(self.right_fit)  # this should be array
+        mean_left = np.mean(self.left_fit, axis=0)
+        mean_right = np.mean(self.right_fit, axis=0)
+        print("mean_left, mean_right", mean_left, mean_right)
+        ploty = self.ploty
+        print("self.ploty", self.ploty)
+        left_fitx = mean_left[0] * ploty ** 2 + mean_left[1] * ploty + mean_left[2]
+        right_fitx = mean_right[0] * ploty ** 2 + mean_right[1] * ploty + mean_right[2]
+        print(left_fitx, right_fitx)
+        return left_fitx, right_fitx
 
     def fill_lane_area(self, img, ploty, left_fitx, right_fitx):
         # Create an image to draw the lines on
@@ -290,7 +349,8 @@ class ImgPipeLine:
 
         # print(pts_left[0][719][0])
         # print(pts_right[0][0][0])
-        lane_center = (pts_left[0][719][0] + pts_right[0][0][0]) / 2
+
+        lane_center = (left_fitx[719] + right_fitx[719]) / 2
         self.lane_centers.append(lane_center)
 
         pts = np.hstack((pts_left, pts_right))
@@ -494,11 +554,36 @@ class ImgPipeLine:
 
         result = cv2.addWeighted(out_img, 1, window_img, 0.3, 0)
 
-        # leftx yerine left_fitx gönderdik, ki bunlar noktalar
-        curvature = measure_curvature(ploty, left_fit, right_fit, leftx=left_fitx, rightx=right_fitx)
-        filled_lane = self.fill_lane_area(result, ploty, left_fitx, right_fitx)
-        self.curvature.append(curvature)
-        self.filled_lane.append(filled_lane)
+        print()
+
+        if left_fitx[719] < 150 or right_fitx[719] > 1130:
+            self.detected = False
+        else:
+            self.detected = True
+
+        if self.detected:
+
+            self.left_fitx.append(left_fitx)
+            self.left_fitx = self.left_fitx[-NUM_ITERATIONS_TO_KEEP:]
+
+            self.right_fitx.append(right_fitx)
+            self.right_fitx = self.right_fitx[-NUM_ITERATIONS_TO_KEEP:]
+            # self.recent_xfitted.append((self.left_fit, self.right_fit))
+            # self.recent_xfitted = self.recent_xfitted[-NUM_ITERATIONS_TO_KEEP:]
+            #
+            curvature = measure_curvature(ploty, left_fit, right_fit, leftx=left_fitx, rightx=right_fitx)
+            self.curvature.append(curvature)  # this is for image pipeline
+            # self.radius_of_curvature = curvature
+
+            # self.filled_lane.append(filled_lane)
+            self.left_fit.append(left_fit)
+            self.left_fit = self.left_fit[-NUM_ITERATIONS_TO_KEEP:]  # keep last N elements
+
+            self.right_fit.append(right_fit)
+            self.right_fit = self.right_fit[-NUM_ITERATIONS_TO_KEEP:]  # keep last N elements
+
+            self.ploty = ploty
+
         return result
 
     def images_pipeline(self):
@@ -535,13 +620,26 @@ class ImgPipeLine:
             for image_path in warped_images:
                 img = cv2.imread(image_path)
                 lines_plotted = self.mark_lines(img)
-                write_to_disk(lines_plotted, image_path=image_path,
+                if self.detected:
+                    print(len(self.left_fitx))
+                    print(len(self.right_fitx))
+                    filled = self.fill_lane_area(lines_plotted, self.ploty, self.left_fitx[-1], self.right_fitx[-1])
+                else:
+                    leftfitx, rightfitx = self.calculate_mean_fit()
+                    filled = self.fill_lane_area(lines_plotted, self.ploty, leftfitx, rightfitx)
+
+                self.filled_lane.append(filled)
+                write_to_disk(filled, image_path=image_path,
                               write_directory="output_images/03_lane_lines/")
 
             # step 5: Fill lane line area on uwarped image and write line parameter on image
             for i, image_path in enumerate(undist_images):
+                print(len(self.filled_lane[i]))
+
                 image = cv2.imread(image_path)
-                unwarped_lane = warper(self.filled_lane[i], src=SRC, dst=DST, inv=True)
+                if self.detected:
+                    unwarped_lane = warper(self.filled_lane[i], src=SRC, dst=DST, inv=True)
+
                 result = cv2.addWeighted(image, 1, unwarped_lane, 0.3, 0)
                 put_curvature = cv2.putText(result, "Radius of Curvature: {}".format(self.curvature[i]), (10, 30),
                                             cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
@@ -563,30 +661,60 @@ class VideoPipeline(ImgPipeLine):
     def __init__(self):
         super().__init__()
         self.image_index = 0
+        self.last_images = []
 
     def full_pipe_for_single_image(self, img):
+
+        self.last_images.append(img)
+        self.last_images = self.last_images[-2:]  # always keep last 2 images (how elegant way of building a stack :) )
+
+        # # mean image
+        mean_image = np.array(np.mean(self.last_images, axis=(0)), dtype=np.uint8)
 
         # read the calibration parameters
         dist_pickle = pickle.load(open("calibration_mtx_dist_pickle.p", "rb"))
         mtx = dist_pickle["mtx"]
         dist = dist_pickle["dist"]
 
-        undistorted = cv2.undistort(img, mtx, dist, None, mtx)
+        undistorted = cv2.undistort(mean_image, mtx, dist, None, mtx)
         binary_img = binary_image(undistorted)
         warped_img = warper(binary_img, src=SRC, dst=DST)
         warped_color = cv2.cvtColor(warped_img, cv2.COLOR_GRAY2BGR)
         lines_plotted = self.mark_lines(warped_color)  # this adds "filled_lane" to "self.filled_lane" array.
+        if self.detected:
+            # print(self.left_fit)
+            # print(self.right_fit)
+            filled = self.fill_lane_area(lines_plotted, self.ploty, self.left_fitx[-1], self.right_fitx[-1])
+        else:
+            print("Not detected")
+
+            # leftfitx, rightfitx = self.calculate_mean_fit()
+            # print(self.left_fit)
+            # print(self.right_fit)
+            mean_left = np.mean(self.left_fit, axis=0)
+            mean_right = np.mean(self.right_fit, axis=0)
+            # print("mean_left, mean_right", mean_left, mean_right)
+            ploty = self.ploty
+            # print("self.ploty", self.ploty)
+            left_fitx = mean_left[0] * ploty ** 2 + mean_left[1] * ploty + mean_left[2]
+            right_fitx = mean_right[0] * ploty ** 2 + mean_right[1] * ploty + mean_right[2]
+            # print("leftfitx, rightfitx", left_fitx, right_fitx)
+            filled = self.fill_lane_area(lines_plotted, self.ploty, left_fitx, right_fitx)
+            # TODO: curvature hesapla!
+        print(filled.shape)
+        self.filled_lane.append(filled)
         unwarped_lane = warper(self.filled_lane[self.image_index], src=SRC, dst=DST, inv=True)
 
         result = cv2.addWeighted(undistorted, 1, unwarped_lane, 0.3, 0)
-        put_curvature = cv2.putText(result, "Radius of Curvature: {}".format(self.curvature[self.image_index]), (10, 30),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
-
-        vehicle_position = calculate_vehicle_pos(self.lane_centers[self.image_index])
-        put_position = cv2.putText(put_curvature, "{}".format(vehicle_position), (10, 90),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
+        # put_curvature = cv2.putText(result, "Radius of Curvature: {}".format(self.curvature[self.image_index]), (10, 50),
+        #                             cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
+        #
+        # vehicle_position = calculate_vehicle_pos(self.lane_centers[self.image_index])
+        # put_position = cv2.putText(put_curvature, "{}".format(vehicle_position), (10, 110),
+        #                            cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
         self.image_index += 1
-        return put_position
+        # return put_position
+        return result
 
     def video_pipeline(self, input_video_path, output_video_path):
 
@@ -596,42 +724,13 @@ class VideoPipeline(ImgPipeLine):
 
         return True
 
-
+#
 video_pipe = VideoPipeline()
 video_pipe.video_pipeline(input_video_path="project_video.mp4", output_video_path="output_videos/project_video.mp4")
+# video_pipe.video_pipeline(input_video_path="challenge_video.mp4", output_video_path="output_videos/challenge_video.mp4")
+# video_pipe.video_pipeline(input_video_path="harder_challenge_video.mp4",
+#                           output_video_path="output_videos/harder_challenge_video.mp4")
 
-# Define a class to receive the characteristics of each line detection
-class Line:
-    def __init__(self):
-        # was the line detected in the last iteration?
-        self.detected = False
-
-        # x values of the last n fits of the line
-        self.recent_xfitted = []
-
-        # average x values of the fitted line over the last n iterations
-        self.bestx = None
-
-        # polynomial coefficients averaged over the last n iterations
-        self.best_fit = None
-
-        # polynomial coefficients for the most recent fit
-        self.current_fit = [np.array([False])]
-
-        # radius of curvature of the line in some units
-        self.radius_of_curvature = None
-
-        # distance in meters of vehicle center from the line
-        self.line_base_pos = None
-
-        # difference in fit coefficients between last and new fits
-        self.diffs = np.array([0, 0, 0], dtype='float')
-
-        # x values for detected line pixels
-        self.allx = None
-
-        # y values for detected line pixels
-        self.ally = None
 
 
 
