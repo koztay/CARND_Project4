@@ -28,7 +28,7 @@ DST = np.float32(
 YM_PER_PIX = 30 / 720  # meters per pixel in y dimension
 XM_PER_PIX = 3.7 / 700  # meters per pixel in x dimension
 
-NUM_ITERATIONS_TO_KEEP = 20
+NUM_ITERATIONS_TO_KEEP = 5
 NUM_IMAGES_TO_KEEP = 2
 
 def calculate_calibration_points(num_rows, num_cols, glob_images_path):
@@ -327,16 +327,14 @@ class ImgPipeLine:
         self.ally = None
 
     def calculate_mean_fit(self):
-        print(self.left_fit)  # this should be array
-        print(self.right_fit)  # this should be array
+
         mean_left = np.mean(self.left_fit, axis=0)
         mean_right = np.mean(self.right_fit, axis=0)
-        print("mean_left, mean_right", mean_left, mean_right)
+        # print("mean_left, mean_right", mean_left, mean_right)
         ploty = self.ploty
-        print("self.ploty", self.ploty)
+        # print("self.ploty", self.ploty)
         left_fitx = mean_left[0] * ploty ** 2 + mean_left[1] * ploty + mean_left[2]
         right_fitx = mean_right[0] * ploty ** 2 + mean_right[1] * ploty + mean_right[2]
-        print(left_fitx, right_fitx)
         return left_fitx, right_fitx
 
     def fill_lane_area(self, img, ploty, left_fitx, right_fitx):
@@ -554,10 +552,26 @@ class ImgPipeLine:
 
         result = cv2.addWeighted(out_img, 1, window_img, 0.3, 0)
 
-        print()
+        bottom_distance = right_fitx[719] - left_fitx[719]
+        top_distance = right_fitx[0] - left_fitx[0]
+
+        # print("bottom_distance", bottom_distance)
+        # print("top_distance", top_distance)
 
         if left_fitx[719] < 150 or right_fitx[719] > 1130:
             self.detected = False
+
+        # looking for paralellness...
+        elif top_distance / bottom_distance > 1.10:
+            print("alt üstten küçük")
+            # üst tarafta merkezden öteye sapma varsa 25 px left and right ekledik merkeze
+            self.detected = False
+
+        elif  top_distance / bottom_distance < 0.85:
+            print("0.9 'dan lüçük")
+            self.detected = False
+        # TODO: rakamlar tutunca bu ikisini birleştir...
+
         else:
             self.detected = True
 
@@ -621,8 +635,8 @@ class ImgPipeLine:
                 img = cv2.imread(image_path)
                 lines_plotted = self.mark_lines(img)
                 if self.detected:
-                    print(len(self.left_fitx))
-                    print(len(self.right_fitx))
+                    # print(len(self.left_fitx))
+                    # print(len(self.right_fitx))
                     filled = self.fill_lane_area(lines_plotted, self.ploty, self.left_fitx[-1], self.right_fitx[-1])
                 else:
                     leftfitx, rightfitx = self.calculate_mean_fit()
@@ -634,7 +648,7 @@ class ImgPipeLine:
 
             # step 5: Fill lane line area on uwarped image and write line parameter on image
             for i, image_path in enumerate(undist_images):
-                print(len(self.filled_lane[i]))
+                # print(len(self.filled_lane[i]))
 
                 image = cv2.imread(image_path)
                 if self.detected:
@@ -686,26 +700,17 @@ class VideoPipeline(ImgPipeLine):
             # print(self.right_fit)
             filled = self.fill_lane_area(lines_plotted, self.ploty, self.left_fitx[-1], self.right_fitx[-1])
         else:
-            print("Not detected")
-
-            # leftfitx, rightfitx = self.calculate_mean_fit()
-            # print(self.left_fit)
-            # print(self.right_fit)
-            mean_left = np.mean(self.left_fit, axis=0)
-            mean_right = np.mean(self.right_fit, axis=0)
-            # print("mean_left, mean_right", mean_left, mean_right)
-            ploty = self.ploty
-            # print("self.ploty", self.ploty)
-            left_fitx = mean_left[0] * ploty ** 2 + mean_left[1] * ploty + mean_left[2]
-            right_fitx = mean_right[0] * ploty ** 2 + mean_right[1] * ploty + mean_right[2]
-            # print("leftfitx, rightfitx", left_fitx, right_fitx)
-            filled = self.fill_lane_area(lines_plotted, self.ploty, left_fitx, right_fitx)
+            leftfitx, rightfitx = self.calculate_mean_fit()
+            filled = self.fill_lane_area(lines_plotted, self.ploty, leftfitx, rightfitx)
             # TODO: curvature hesapla!
-        print(filled.shape)
+        # print(filled.shape)
         self.filled_lane.append(filled)
         unwarped_lane = warper(self.filled_lane[self.image_index], src=SRC, dst=DST, inv=True)
 
         result = cv2.addWeighted(undistorted, 1, unwarped_lane, 0.3, 0)
+        put_curvature = cv2.putText(result, "Lines detected: {}".format(self.detected), (10, 50),
+                                    cv2.FONT_HERSHEY_PLAIN,  2, (255, 255, 255), 1)
+
         # put_curvature = cv2.putText(result, "Radius of Curvature: {}".format(self.curvature[self.image_index]), (10, 50),
         #                             cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
         #
@@ -714,7 +719,7 @@ class VideoPipeline(ImgPipeLine):
         #                            cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
         self.image_index += 1
         # return put_position
-        return result
+        return put_curvature
 
     def video_pipeline(self, input_video_path, output_video_path):
 
