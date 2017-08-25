@@ -13,16 +13,40 @@ XF_BOTTOM_LEFT = 25
 XF_BOTTOM_RIGHT = 45
 YF = 95
 
+# SRC = np.float32(
+#     [[(IMG_SIZE[0] / 2) - XF_TOP_LEFT, IMG_SIZE[1] / 2 + YF],  # top_left
+#      [((IMG_SIZE[0] / 6) - XF_BOTTOM_LEFT), IMG_SIZE[1]],  # bottom_left
+#      [(IMG_SIZE[0] * 5 / 6) + XF_BOTTOM_RIGHT, IMG_SIZE[1]],  # bottom_right
+#      [(IMG_SIZE[0] / 2 + XF_TOP_RIGHT), IMG_SIZE[1] / 2 + YF]])  # top_right
+
+# print(SRC)
+"""
+[[  586.           455.        ]
+ [  188.33332825   720.        ]
+ [ 1111.66662598   720.        ]
+ [  695.           455.        ]]
+"""
+
+# SRC FROM TEMPLATE
 SRC = np.float32(
-    [[(IMG_SIZE[0] / 2) - XF_TOP_LEFT, IMG_SIZE[1] / 2 + YF],  # top_left
-     [((IMG_SIZE[0] / 6) - XF_BOTTOM_LEFT), IMG_SIZE[1]],  # bottom_left
-     [(IMG_SIZE[0] * 5 / 6) + XF_BOTTOM_RIGHT, IMG_SIZE[1]],  # bottom_right
-     [(IMG_SIZE[0] / 2 + XF_TOP_RIGHT), IMG_SIZE[1] / 2 + YF]])  # top_right
+    [[(IMG_SIZE[0] / 2) - 55, IMG_SIZE[1] / 2 + 95],
+     [((IMG_SIZE[0] / 6) - 40), IMG_SIZE[1]],
+     [(IMG_SIZE[0] * 5 / 6) + 75, IMG_SIZE[1]],
+     [(IMG_SIZE[0] / 2 + 55), IMG_SIZE[1] / 2 + 95]])
+
 DST = np.float32(
     [[(IMG_SIZE[0] / 4), 0],
      [(IMG_SIZE[0] / 4), IMG_SIZE[1]],
      [(IMG_SIZE[0] * 3 / 4), IMG_SIZE[1]],
      [(IMG_SIZE[0] * 3 / 4), 0]])
+
+# print(DST)
+"""
+[[ 320.    0.]
+ [ 320.  720.]
+ [ 960.  720.]
+ [ 960.    0.]]
+"""
 
 # Define conversions in x and y from pixels space to meters
 YM_PER_PIX = 30 / 720  # meters per pixel in y dimension
@@ -30,6 +54,51 @@ XM_PER_PIX = 3.7 / 700  # meters per pixel in x dimension
 
 NUM_ITERATIONS_TO_KEEP = 5
 NUM_IMAGES_TO_KEEP = 2
+
+
+# define the list of boundaries
+
+def draw_source_lines(img, points=SRC):
+    pts = np.int32(points)
+    return cv2.polylines(img, [pts], True, (0, 0, 255))
+
+
+# def gray_treshold(img):
+#     gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+#
+#     return gray_img
+
+#
+# def detect_color(img):
+#     image = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+#     # white color mask
+#     # lower = np.uint8([200, 200, 200])
+#     # upper = np.uint8([255, 255, 255])
+#     # white_mask = cv2.inRange(image, lower, upper)
+#     # yellow color mask
+#     lower = np.uint8([180, 180,   0])
+#     upper = np.uint8([255, 255, 255])
+#     yellow_mask = cv2.inRange(image, lower, upper)
+#     # combine the mask
+#     # mask = cv2.bitwise_or(white_mask, yellow_mask)
+#     masked = cv2.bitwise_and(image, image, mask=yellow_mask)
+#     return masked
+
+
+# def select_white_yellow(image):
+#     converted = cv2.cvtColor(image, cv2.COLOR_BGR2HLS)
+#     # white color mask
+#     lower = np.uint8([0, 200,   0])
+#     upper = np.uint8([255, 255, 255])
+#     white_mask = cv2.inRange(converted, lower, upper)
+#     # yellow color mask
+#     lower = np.uint8([10,   0, 100])
+#     upper = np.uint8([40, 255, 255])
+#     yellow_mask = cv2.inRange(converted, lower, upper)
+#     # combine the mask
+#     mask = cv2.bitwise_or(white_mask, yellow_mask)
+#     return cv2.bitwise_and(image, image, mask=mask)
+
 
 def calculate_calibration_points(num_rows, num_cols, glob_images_path):
     """
@@ -103,27 +172,6 @@ def calculate_mtx_and_dist_points(imgpoints, objpoints, img_size):
     return mtx, dist
 
 
-def undistort_images(mtx, dist, images):
-    """
-    undistorts images in a folder read by glob api
-    :param mtx: calibration matrix parameter
-    :param dist:  calibration dist parameter
-    :param images: images = glob.glob("camera_cal/*.jpg")
-    :return: undistorted image paths as an array like glob api returns.
-    """
-    undistorted_image_paths = []
-    # Use the OpenCV undistort() function to remove distortion
-    for image in images:
-        img = cv2.imread(image)
-        undist = cv2.undistort(img, mtx, dist, None, mtx)
-        filename = image.split("/")[1].split(".")[0]  # removed path and after extension
-        undist_img_path = "output_images/00_undistorted_images/{}.jpg".format(filename)
-        undistorted_image_paths.append(undist_img_path)
-        cv2.imwrite(undist_img_path, undist)
-
-    return undistorted_image_paths
-
-
 def write_to_disk(img, image_path, write_directory, is_binary=False):
     image_name = image_path.split("/")[-1].split(".")[0]
     new_image_path = write_directory + image_name + ".jpg"
@@ -134,8 +182,64 @@ def write_to_disk(img, image_path, write_directory, is_binary=False):
             cv2.imwrite(new_image_path, img)
 
 
+# for orient=x the best value is 12
+# for orient=y the best value is 25
+def abs_sobel_thresh(img, orient='x', thresh_min=0, thresh_max=255):
+    # Convert to grayscale
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    # Apply x or y gradient with the OpenCV Sobel() function
+    # and take the absolute value
+    if orient == 'x':
+        abs_sobel = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 1, 0))
+    if orient == 'y':
+        abs_sobel = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 0, 1))
+    # Rescale back to 8 bit integer
+    scaled_sobel = np.uint8(255*abs_sobel/np.max(abs_sobel))
+    # Create a copy and apply the threshold
+    binary_output = np.zeros_like(scaled_sobel)
+    # Here I'm using inclusive (>=, <=) thresholds, but exclusive is ok too
+    binary_output[(scaled_sobel >= thresh_min) & (scaled_sobel <= thresh_max)] = 1
+
+    # Return the result
+    return binary_output
+
+
+# for s_tresh the best value is (100, 255)
+# for v_tresh the best value is (50, 255)
+def color_treshold(img, s_thresh=(0, 255), v_thresh=(0, 255)):
+
+    # Convert to HLS color space and separate the S channel
+    hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS).astype(np.float)
+    s_channel = hls[:, :, 2]
+    s_binary = np.zeros_like(s_channel)
+    s_binary[(s_channel >= s_thresh[0]) & (s_channel <= s_thresh[1])] = 1
+
+    # Convert to HSV color space and separate the V channel
+    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV).astype(np.float)
+    v_channel = hsv[:, :, 2]
+    v_binary = np.zeros_like(s_channel)
+    v_binary[(v_channel >= v_thresh[0]) & (v_channel <= v_thresh[1])] = 1
+
+    combined_binary = np.zeros_like(v_channel)
+    combined_binary[(s_binary == 1) & (v_binary == 1)] = 1
+
+    return combined_binary
+
+
+def binary_image_2(img):
+
+    combined_binary = np.zeros_like(img[:, :, 0])
+    gradx = abs_sobel_thresh(img, orient='x', thresh_min=12, thresh_max=255)
+    grady = abs_sobel_thresh(img, orient='y', thresh_min=25, thresh_max=255)
+    color_binary = color_treshold(img, s_thresh=(100, 255), v_thresh=(50, 255))
+    combined_binary[(gradx == 1) & (grady == 1) | (color_binary == 1)] = 1
+
+    return combined_binary
+
+
+# this func is from the lessons
 def binary_image(img, s_thresh=(170, 255), sx_thresh=(20, 100)):
-    img = np.copy(img)
+
     # Convert to HSV color space and separate the V channel
     hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS).astype(np.float)
     l_channel = hls[:, :, 1]
@@ -219,7 +323,11 @@ def calibration_pipeline():
 
         # step 4: undistort and save calibration images used for calibration
         images = glob.glob("camera_cal/*.jpg")
-        undistort_images(mtx, dist, images)
+        for image_path in images:
+            img = cv2.imread(image_path)
+            undist = cv2.undistort(img, mtx, dist, None, mtx)
+            write_to_disk(undist, image_path=image_path,
+                          write_directory="output_images/00_undistorted_calibration_images/")
 
 
 def measure_curvature(ploty=None,
@@ -271,9 +379,9 @@ def calculate_vehicle_pos(lane_center):
     if distance_in_meters == 0:  # Vehicle is in center
         position = "Vehicle is in center."
     elif distance_in_meters > 0:
-        position = "Vehicle is {0:.2f} m right of center.".format(distance_in_meters)
+        position = "Vehicle is {0:.2f} m left of center.".format(distance_in_meters)
     else:
-        position = "Vehicle is {0:.2f} m left of center.".format(-distance_in_meters)
+        position = "Vehicle is {0:.2f} m right of center.".format(-distance_in_meters)
     return position
 
 
@@ -562,20 +670,20 @@ class ImgPipeLine:
             self.detected = False
 
         # looking for paralellness...
-        elif top_distance / bottom_distance > 1.10:
+        elif top_distance / bottom_distance > 1.2:
             print("alt üstten küçük")
             # üst tarafta merkezden öteye sapma varsa 25 px left and right ekledik merkeze
             self.detected = False
 
-        elif  top_distance / bottom_distance < 0.85:
-            print("0.9 'dan lüçük")
+        elif top_distance / bottom_distance < 0.80:
+            print("0.8 'den küçük")
             self.detected = False
         # TODO: rakamlar tutunca bu ikisini birleştir...
 
         else:
             self.detected = True
 
-        if self.detected:
+        if self.detected or len(self.left_fitx) == 0:  # eğer array emty ise illa ki koy
 
             self.left_fitx.append(left_fitx)
             self.left_fitx = self.left_fitx[-NUM_ITERATIONS_TO_KEEP:]
@@ -612,12 +720,23 @@ class ImgPipeLine:
             dist = dist_pickle["dist"]
 
             # undistort test images
-            undist_images = undistort_images(mtx, dist, images)
+            for image_path in images:
+                img = cv2.imread(image_path)
+                undist = cv2.undistort(img, mtx, dist, None, mtx)
+                write_to_disk(undist, image_path=image_path,
+                              write_directory="output_images/00_undistorted_test_images/")
+                source_lines = draw_source_lines(undist, points=SRC)
+
+                write_to_disk(source_lines, image_path=image_path,
+                              write_directory="output_images/00_undistorted_test_images_with_src_lines/")
+
+            undist_images = glob.glob("output_images/00_undistorted_test_images/*.jpg")
 
             # step 2: create a binary image
             for image_path in undist_images:
+                print(image_path)
                 img = cv2.imread(image_path)
-                binary_img = binary_image(img)
+                binary_img = binary_image_2(img)
                 write_to_disk(binary_img, image_path=image_path,
                               write_directory="output_images/01_binary_images/", is_binary=True)
 
@@ -641,6 +760,7 @@ class ImgPipeLine:
                 else:
                     leftfitx, rightfitx = self.calculate_mean_fit()
                     filled = self.fill_lane_area(lines_plotted, self.ploty, leftfitx, rightfitx)
+                    self.curvature.append(np.mean(self.curvature[-5:]))  # append last mean of last 5 curvatures
 
                 self.filled_lane.append(filled)
                 write_to_disk(filled, image_path=image_path,
@@ -649,25 +769,24 @@ class ImgPipeLine:
             # step 5: Fill lane line area on uwarped image and write line parameter on image
             for i, image_path in enumerate(undist_images):
                 # print(len(self.filled_lane[i]))
+                if self.detected:
+                    print("Detected")
+                else:
+                    print("Not Detected")
 
                 image = cv2.imread(image_path)
-                if self.detected:
-                    unwarped_lane = warper(self.filled_lane[i], src=SRC, dst=DST, inv=True)
+
+                unwarped_lane = warper(self.filled_lane[i], src=SRC, dst=DST, inv=True)
 
                 result = cv2.addWeighted(image, 1, unwarped_lane, 0.3, 0)
-                put_curvature = cv2.putText(result, "Radius of Curvature: {}".format(self.curvature[i]), (10, 30),
-                                            cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
+                put_curvature = cv2.putText(result, "Radius of Curvature: {:.3f}".format(self.curvature[i]), (10, 30),
+                                            cv2.FONT_HERSHEY_PLAIN, 2, (255, 255, 255), 1)
 
                 vehicle_position = calculate_vehicle_pos(self.lane_centers[i])
                 put_position = cv2.putText(put_curvature, "{}".format(vehicle_position), (10, 90),
-                                           cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
+                                           cv2.FONT_HERSHEY_PLAIN, 2, (255, 255, 255), 1)
                 write_to_disk(put_position, image_path=image_path,
                               write_directory="output_images/04_unwarped_images/")
-
-
-# images_pipeline()
-# pipeline = ImgPipeLine()
-# pipeline.images_pipeline()
 
 
 class VideoPipeline(ImgPipeLine):
@@ -691,7 +810,8 @@ class VideoPipeline(ImgPipeLine):
         dist = dist_pickle["dist"]
 
         undistorted = cv2.undistort(mean_image, mtx, dist, None, mtx)
-        binary_img = binary_image(undistorted)
+        binary_img = binary_image_2(undistorted)
+        # binary_img = binary_image_2(undistorted)
         warped_img = warper(binary_img, src=SRC, dst=DST)
         warped_color = cv2.cvtColor(warped_img, cv2.COLOR_GRAY2BGR)
         lines_plotted = self.mark_lines(warped_color)  # this adds "filled_lane" to "self.filled_lane" array.
@@ -700,26 +820,28 @@ class VideoPipeline(ImgPipeLine):
             # print(self.right_fit)
             filled = self.fill_lane_area(lines_plotted, self.ploty, self.left_fitx[-1], self.right_fitx[-1])
         else:
+
             leftfitx, rightfitx = self.calculate_mean_fit()
             filled = self.fill_lane_area(lines_plotted, self.ploty, leftfitx, rightfitx)
-            # TODO: curvature hesapla!
+            self.curvature.append(np.mean(self.curvature[-5:]))  # append last mean of last 5 curvatures
+
         # print(filled.shape)
         self.filled_lane.append(filled)
         unwarped_lane = warper(self.filled_lane[self.image_index], src=SRC, dst=DST, inv=True)
 
         result = cv2.addWeighted(undistorted, 1, unwarped_lane, 0.3, 0)
-        put_curvature = cv2.putText(result, "Lines detected: {}".format(self.detected), (10, 50),
+        lines_detected = cv2.putText(result, "Lines detected: {}".format(self.detected), (10, 50),
                                     cv2.FONT_HERSHEY_PLAIN,  2, (255, 255, 255), 1)
 
-        # put_curvature = cv2.putText(result, "Radius of Curvature: {}".format(self.curvature[self.image_index]), (10, 50),
-        #                             cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
+        put_curvature = cv2.putText(lines_detected, "Radius of Curvature: {:.3f}".format(self.curvature[self.image_index]),
+                                    (10, 90), cv2.FONT_HERSHEY_PLAIN, 2, (255, 255, 255), 1)
         #
-        # vehicle_position = calculate_vehicle_pos(self.lane_centers[self.image_index])
-        # put_position = cv2.putText(put_curvature, "{}".format(vehicle_position), (10, 110),
-        #                            cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 3)
+        vehicle_position = calculate_vehicle_pos(self.lane_centers[self.image_index])
+        put_position = cv2.putText(put_curvature, "{}".format(vehicle_position), (10, 130),
+                                   cv2.FONT_HERSHEY_PLAIN, 2, (255, 255, 255), 1)
         self.image_index += 1
-        # return put_position
-        return put_curvature
+        return put_position
+        # return put_curvature
 
     def video_pipeline(self, input_video_path, output_video_path):
 
@@ -729,14 +851,17 @@ class VideoPipeline(ImgPipeLine):
 
         return True
 
+
+# calibration_pipeline()
+# pipeline = ImgPipeLine()
+# pipeline.images_pipeline()
+
+
 #
 video_pipe = VideoPipeline()
 video_pipe.video_pipeline(input_video_path="project_video.mp4", output_video_path="output_videos/project_video.mp4")
 # video_pipe.video_pipeline(input_video_path="challenge_video.mp4", output_video_path="output_videos/challenge_video.mp4")
-# video_pipe.video_pipeline(input_video_path="harder_challenge_video.mp4",
-#                           output_video_path="output_videos/harder_challenge_video.mp4")
 
-
-
+#
 
 
