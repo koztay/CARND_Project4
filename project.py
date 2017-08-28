@@ -746,13 +746,15 @@ class ImgPipeLine:
                 img = cv2.imread(image_path)
                 warped_img = warper(img, src=SRC, dst=DST)
                 write_to_disk(warped_img, image_path=image_path,
-                              write_directory="output_images/02_perspective_transform//")
+                              write_directory="output_images/02_perspective_transform/")
 
             # step 4: Draw lane line pixels been identified in the rectified image and fit with a polynomial
             warped_images = glob.glob("output_images/02_perspective_transform/*.jpg")
             for image_path in warped_images:
                 img = cv2.imread(image_path)
                 lines_plotted = self.mark_lines(img)
+                write_to_disk(lines_plotted, image_path=image_path,
+                              write_directory="output_images/02_perspective_marked_lines/")
                 if self.detected:
                     # print(len(self.left_fitx))
                     # print(len(self.right_fitx))
@@ -853,15 +855,13 @@ class VideoPipeline(ImgPipeLine):
 
 
 # calibration_pipeline()
-# pipeline = ImgPipeLine()
-# pipeline.images_pipeline()
+pipeline = ImgPipeLine()
+pipeline.images_pipeline()
 
 
 #
-video_pipe = VideoPipeline()
-video_pipe.video_pipeline(input_video_path="project_video.mp4", output_video_path="output_videos/project_video.mp4")
+# video_pipe = VideoPipeline()
+# video_pipe.video_pipeline(input_video_path="project_video.mp4", output_video_path="output_videos/project_video.mp4")
 # video_pipe.video_pipeline(input_video_path="challenge_video.mp4", output_video_path="output_videos/challenge_video.mp4")
-
 #
-
 
