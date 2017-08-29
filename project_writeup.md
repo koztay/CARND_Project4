@@ -65,7 +65,7 @@ At this step I applied `cv2.undistort()` function to all the test images and sav
 
 #### 2. Describe how (and identify where in your code) you used color transforms, gradients or other methods to create a thresholded binary image.  Provide an example of a binary image result.
 
-I used a combination of color and gradient thresholds (gradx and grady) to generate a binary image after several tests. For this process I have created 2 function `binary_image()` and `binary_image2()`. first function is the same that showed in the lessons but it did not performed well. So I created another one `binary_image2()` and used several combinations in order to convert the images binary and finally found a version which performs better. This function is defined the lines between 229 and 237. This function is also uses two helper functions `abs_sobel_thresh()` (lines between 187-204) and `color_treshold()` (lines between 209-226) . Here's an example of my output for this step.  (note: this is not actually from one of the test images)
+I used a combination of color and gradient thresholds (gradx and grady) to generate a binary image after several tests. For this process I have created 2 function `binary_image()` and `binary_image2()`. First function is the same that showed in the lessons but it did not performed well. So I created another one `binary_image2()` and used several combinations in order to convert the images to binary and finally found a version which performs better. This function is defined the lines between 229 and 237. This function is also uses two helper functions `abs_sobel_thresh()` (lines between 187-204) and `color_treshold()` (lines between 209-226) . Here's an example of my output for this step.  
 
 ![binary test image][binary_test_image]
 
